@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:14-alpine
+    container_name: cmms_postgres_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_DB=${DB_NAME:-cmms_db}
+      - POSTGRES_USER=${DB_USER:-cmms_user}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-cmms_password}
+    ports:
+      - "${DB_PORT_HOST:-5432}:5432" # Expose DB port to host if needed for direct access
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cmms_backend_api
+    command: >
+      sh -c "python manage.py makemigrations &&
+             python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./backend:/app # Mounts the backend code into the container for development
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-django-insecure-placeholder_secret_key_for_development_!change_me!}
+      - DJANGO_DEBUG=${DJANGO_DEBUG:-True}
+      - DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      - DB_NAME=${DB_NAME:-cmms_db}
+      - DB_USER=${DB_USER:-cmms_user}
+      - DB_PASSWORD=${DB_PASSWORD:-cmms_password}
+      - DB_HOST=db # Service name of the PostgreSQL container
+      - DB_PORT=${DB_PORT:-5432}
+      # Add other environment variables as needed
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # frontend: # Placeholder for frontend service - will be configured in a later step
+  #   build:
+  #     context: ./frontend/app # Assuming React app is in 'app' subdirectory
+  #     dockerfile: Dockerfile
+  #   container_name: cmms_frontend_ui
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - ./frontend/app:/app # Mounts the frontend code for development
+  #     - /app/node_modules # Avoids overwriting node_modules from host
+  #   environment:
+  #     - REACT_APP_API_URL=http://localhost:8000/api # Or http://backend:8000/api if using Docker network
+  #     - CHOKIDAR_USEPOLLING=true # May be needed for hot reloading in some Docker setups
+  frontend:
+    build:
+      context: ./frontend/app # Ensure this context matches your React app location
+      dockerfile: ../Dockerfile # Dockerfile is in ./frontend, not ./frontend/app
+    container_name: cmms_frontend_ui
+    ports:
+      - "3000:3000" # For CRA dev server, or "80:80" if serving build from Nginx in Dockerfile
+    volumes:
+      - ./frontend/app:/app # Mounts the frontend code for development
+      - /app/node_modules # Avoids overwriting node_modules from host
+    environment:
+      - REACT_APP_API_BASE_URL=http://localhost:8000/api # For local dev accessing backend on host
+      # For container-to-container, use http://backend:8000/api if backend is aliased as 'backend'
+      # - REACT_APP_API_BASE_URL=http://backend:8000/api
+      - CHOKIDAR_USEPOLLING=true # May be needed for hot reloading in some Docker setups
+      - WDS_SOCKET_PORT=3000 # Ensure webpack dev server uses the exposed port
+    # If your frontend Dockerfile uses a dev server (e.g. `npm start`):
+    # command: npm start # or yarn start
+    # If your frontend Dockerfile builds and serves static files (e.g. with Nginx):
+    # The CMD in the Dockerfile will handle this. No command override needed here.
+    # For development with hot-reloading, ensure the Dockerfile's CMD is `npm start` or similar.
+    # For production, the Dockerfile CMD should serve the build.
+    # The current frontend Dockerfile is set up for Nginx (production-like).
+    # To use CRA dev server, the frontend Dockerfile CMD needs to be `npm start` and port 3000 exposed.
+    # For simplicity now, assuming the Dockerfile will be adjusted for dev server if needed.
+    # If using Nginx from Dockerfile, then port should be 80:80 or similar for Nginx.
+    # Let's adjust for CRA dev server for now, assuming frontend Dockerfile CMD is `npm start`.
+    # The provided frontend Dockerfile uses Nginx, so this needs alignment.
+    # For now, let's assume the user wants to run `npm start` in the container for dev.
+    # I will adjust the frontend Dockerfile in a subsequent step if this is not the desired setup.
+    # For now, the docker-compose assumes the frontend Dockerfile will serve on 3000 (e.g. CRA dev server)
+    # The current frontend Dockerfile IS for NGINX on port 80.
+    # So, the ports should be "3000:80" if host 3000 maps to container 80 (nginx)
+
+    # Corrected port mapping for NGINX in frontend Dockerfile
+    ports:
+      - "3000:80"
+
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
