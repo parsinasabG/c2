@@ -1,7 +1,7 @@
 import uuid
 from django.db import models
-from django.conf import settings # If using AUTH_USER_MODEL for assigned_to
-from assets.models import Asset # Assuming Asset model is in an 'assets' app
+# from django.conf import settings # If using AUTH_USER_MODEL for assigned_to
+from assets.models import Asset
 
 class MaintenancePlan(models.Model):
     SCHEDULE_TYPES = [
@@ -45,10 +45,7 @@ class PMTask(models.Model):
     maintenance_plan = models.ForeignKey(MaintenancePlan, on_delete=models.CASCADE, related_name='pm_tasks')
     description = models.TextField(help_text="Description of the task to be performed")
     estimated_duration_hours = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, help_text="Estimated time in hours to complete the task")
-    # assigned_to_role can be simple CharField or FK to a new 'Role' model if roles are complex
     assigned_to_role = models.CharField(max_length=100, blank=True, null=True, help_text="Role responsible for this task (e.g., 'Technician', 'Electrician')")
-    # Or, if assigning to specific users:
-    # assigned_to_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, blank=True, null=True, related_name='pm_tasks')
     sequence_order = models.PositiveIntegerField(default=0, help_text="Order in which this task should be performed within the plan")
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -83,14 +80,13 @@ class PMChecklistItem(models.Model):
 
 class PreventiveMaintenanceSOP(models.Model):
     uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    # SOPs can be linked to a whole plan or a specific task
     maintenance_plan = models.ForeignKey(MaintenancePlan, on_delete=models.CASCADE, related_name='sops', blank=True, null=True)
     pm_task = models.ForeignKey(PMTask, on_delete=models.CASCADE, related_name='sops', blank=True, null=True)
 
     title = models.CharField(max_length=255, help_text="Title of the SOP document")
-    document = models.FileField(upload_to='sops/', help_text="The SOP document file")
+    document = models.FileField(upload_to='sops/preventive_maintenance/', help_text="The SOP document file")
     version = models.CharField(max_length=50, blank=True, null=True, help_text="Document version")
-    upload_date = models.DateField(auto_now_add=True, help_text="Date when the SOP was uploaded")
+    upload_date = models.DateField(auto_now_add=True, help_text="Date when the SOP was uploaded") # auto_now_add for upload_date might be better as default=date.today
     description = models.TextField(blank=True, null=True, help_text="Brief description of the SOP")
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -107,41 +103,22 @@ class PreventiveMaintenanceSOP(models.Model):
         ordering = ['title', '-upload_date']
         verbose_name = "Preventive Maintenance SOP"
         verbose_name_plural = "Preventive Maintenance SOPs"
-        constraints = [
-            models.CheckConstraint(
-                check=(
-                    models.Q(maintenance_plan__isnull=False, pm_task__isnull=True) |
-                    models.Q(maintenance_plan__isnull=True, pm_task__isnull=False) |
-                    models.Q(maintenance_plan__isnull=False, pm_task__isnull=False) # Or allow both if SOP can be general to plan but also specific to task
-                ),
-                name='sop_linked_to_plan_or_task_or_both_if_needed'
-                # If SOP must be linked to EITHER plan OR task, but not both and not neither (and not neither if one is optional):
-                # check=(
-                #    (models.Q(maintenance_plan__isnull=False) & models.Q(pm_task__isnull=True)) |
-                #    (models.Q(maintenance_plan__isnull=True) & models.Q(pm_task__isnull=False))
-                # ),
-                # name='sop_linked_to_plan_or_task'
-                # For now, allowing it to be linked to plan, task, or both, but one must be present if the other isn't.
-                # A simpler approach if SOP is always for a plan OR a task but not both:
-                # Make pm_task nullable and maintenance_plan nullable. Add a clean method to validate.
-                # For now, the constraint above is a bit complex. Let's simplify by making them both optional
-                # and relying on application logic or a more specific model if an SOP *must* be tied to one or the other.
-                # The current FKs allow an SOP to be tied to a plan, or a task, or both, or neither (if both blank=True, null=True).
-                # Let's ensure at least one is chosen or make them mutually exclusive via clean() or more specific models.
-                # For now, I'll remove the constraint as it's complex and might be overly restrictive initially.
-                # It can be added back with more specific business rules.
-            )
-        ]
 
-    # def clean(self):
-    #     from django.core.exceptions import ValidationError
-    #     if self.maintenance_plan and self.pm_task:
-    #         # Or, if this is allowed, perhaps check if pm_task belongs to maintenance_plan
-    #         pass # Allow SOP to be for a plan and refined for a task within it
-    #     if not self.maintenance_plan and not self.pm_task:
-    #         raise ValidationError('An SOP must be related to either a Maintenance Plan or a PM Task.')
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        # Ensure SOP is linked to at least a plan or a task, but not necessarily exclusively one.
+        # This logic can be adjusted based on more specific business rules.
+        # If an SOP can be general to a plan AND more specific to a task within that plan, this is fine.
+        # If it must be EITHER plan OR task, then:
+        # if self.maintenance_plan and self.pm_task:
+        #     raise ValidationError("SOP cannot be linked to both a Maintenance Plan and a PM Task simultaneously. Choose one.")
+        if not self.maintenance_plan and not self.pm_task:
+             raise ValidationError("An SOP must be related to either a Maintenance Plan or a PM Task.")
 
-# Ensure the 'sops/' directory exists in your MEDIA_ROOT if you use FileField.
-# MEDIA_URL = '/media/'
-# MEDIA_ROOT = BASE_DIR / 'media'
-# Need to add these to settings.py and configure URL serving for media files for development.
+        # If linked to a task, ensure task belongs to the linked plan (if plan is also linked)
+        if self.maintenance_plan and self.pm_task:
+            if self.pm_task.maintenance_plan != self.maintenance_plan:
+                raise ValidationError("The PM Task selected does not belong to the selected Maintenance Plan.")
+
+# Note: MEDIA_ROOT and MEDIA_URL need to be configured in settings.py for FileField.
+# The upload_to path 'sops/preventive_maintenance/' is relative to MEDIA_ROOT.

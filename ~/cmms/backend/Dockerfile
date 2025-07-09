@@ -25,15 +25,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the Django project code into the container
 COPY . /app/
 
+# Ensure manage.py is executable
+RUN chmod +x manage.py
+
 # Expose the port the app runs on
 EXPOSE 8000
 
-# Command to run the application using Gunicorn (recommended for production)
-# You might need to create a gunicorn_config.py or adjust workers based on your server
-# For development, you might use: CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
-# Ensure manage.py is executable: RUN chmod +x manage.py
-# CMD ["gunicorn", "cmms_api.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
-
-# For now, let's use the development server for simplicity in this generated Dockerfile.
-# Remember to change this for production.
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+# Command to run the application
+# The command in docker-compose.yml will override this if specified there.
+# This default CMD is useful if running the image directly without docker-compose.
+CMD ["sh", "-c", "python manage.py makemigrations && python manage.py migrate && python manage.py runserver 0.0.0.0:8000"]

@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import FaultCategory, RootCause, BreakdownReport
-from assets.serializers import AssetSerializer # For nested asset details
+from assets.serializers import AssetSerializer
+# from work_orders.serializers import WorkOrderSerializer # Avoid circular import if WorkOrderSerializer imports this
 
 User = get_user_model()
 
@@ -12,64 +13,67 @@ class FaultCategorySerializer(serializers.ModelSerializer):
         read_only_fields = ('uuid', 'created_at', 'updated_at')
 
 class RootCauseSerializer(serializers.ModelSerializer):
-    # Optional: Show category name instead of ID for read operations
-    category_name = serializers.StringRelatedField(source='category.name', read_only=True)
+    category_name = serializers.StringRelatedField(source='category.name', read_only=True, allow_null=True)
 
     class Meta:
         model = RootCause
-        fields = '__all__' # Includes 'category' as ID for write, 'category_name' for read
+        fields = '__all__'
         read_only_fields = ('uuid', 'created_at', 'updated_at', 'category_name')
 
 class BreakdownReportSerializer(serializers.ModelSerializer):
     asset_details = AssetSerializer(source='asset', read_only=True)
     reported_by_username = serializers.StringRelatedField(source='reported_by.username', read_only=True, allow_null=True)
 
-    # For write operations, we expect UUIDs for M2M fields
     identified_root_causes = serializers.PrimaryKeyRelatedField(
         queryset=RootCause.objects.all(),
         many=True,
         required=False,
+        allow_null=True, # Allow empty list for M2M
         help_text="List of Root Cause UUIDs."
     )
-    # For read operations, we can nest the full RootCause objects if desired
     identified_root_causes_details = RootCauseSerializer(source='identified_root_causes', many=True, read_only=True)
+    downtime_duration_hours = serializers.FloatField(read_only=True)
 
-    downtime_duration_hours = serializers.FloatField(read_only=True) # From model property
+    # For work_order, expect UUID for write, provide basic details for read
+    work_order_id_display = serializers.StringRelatedField(source='work_order.work_order_id', read_only=True, allow_null=True)
+    # work_order = serializers.PrimaryKeyRelatedField(queryset=WorkOrder.objects.all(), allow_null=True, required=False, write_only=True)
+    # PrimaryKeyRelatedField is default for FK, so 'work_order' field will handle UUID input.
 
     class Meta:
         model = BreakdownReport
         fields = [
-            'uuid', 'asset', 'asset_details', 'reported_by', 'reported_by_username',
+            'uuid', 'asset', 'asset_details',
+            'reported_by', 'reported_by_username',
             'report_time', 'description_of_fault', 'severity', 'status',
             'downtime_started_at', 'downtime_ended_at', 'downtime_duration_hours',
             'resolution_details', 'root_cause_analysis',
             'identified_root_causes', 'identified_root_causes_details',
+            'work_order', 'work_order_id_display', # work_order for write, work_order_id_display for read
             'created_at', 'updated_at'
-            # 'work_order' # Add when WorkOrder model/serializer exists
         ]
         read_only_fields = (
             'uuid', 'report_time', 'created_at', 'updated_at',
             'asset_details', 'reported_by_username',
-            'identified_root_causes_details', 'downtime_duration_hours'
+            'identified_root_causes_details', 'downtime_duration_hours',
+            'work_order_id_display'
         )
-        # 'asset' and 'reported_by' will expect PKs (or UUIDs if PK is UUID) for write operations.
-        # 'identified_root_causes' is explicitly set up to expect a list of PKs/UUIDs.
-
-    def validate_reported_by(self, value):
-        # Ensure the user exists if provided
-        # This is often handled by PrimaryKeyRelatedField by default if 'reported_by' was one,
-        # but since it's a ForeignKey to settings.AUTH_USER_MODEL, this is a good check.
-        if value and not User.objects.filter(pk=value.pk).exists():
-            raise serializers.ValidationError("User not found.")
-        return value
 
     def validate(self, data):
-        """
-        Check that downtime_ended_at is after downtime_started_at if both are provided.
-        """
-        started_at = data.get('downtime_started_at', getattr(self.instance, 'downtime_started_at', None))
-        ended_at = data.get('downtime_ended_at', getattr(self.instance, 'downtime_ended_at', None))
+        # Get instance if available (for updates)
+        instance = getattr(self, 'instance', None)
 
-        if started_at and ended_at and ended_at < started_at:
+        downtime_started_at = data.get('downtime_started_at', getattr(instance, 'downtime_started_at', None))
+        downtime_ended_at = data.get('downtime_ended_at', getattr(instance, 'downtime_ended_at', None))
+
+        if downtime_started_at and downtime_ended_at and downtime_ended_at < downtime_started_at:
             raise serializers.ValidationError({"downtime_ended_at": "Downtime ended_at cannot be before started_at."})
+
+        status = data.get('status', getattr(instance, 'status', None))
+        resolution_details = data.get('resolution_details', getattr(instance, 'resolution_details', None))
+
+        if status in ['RESOLVED', 'CLOSED']:
+            if not resolution_details:
+                raise serializers.ValidationError({'resolution_details': "Resolution details are required for resolved or closed breakdowns."})
+            if not downtime_ended_at: # Making this check stricter in serializer
+                raise serializers.ValidationError({'downtime_ended_at': "Downtime ended time is required for resolved or closed breakdowns."})
         return data

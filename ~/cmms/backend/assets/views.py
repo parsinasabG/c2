@@ -1,32 +1,33 @@
 from rest_framework import viewsets, permissions
+from django_filters.rest_framework import DjangoFilterBackend
 from .models import Asset
 from .serializers import AssetSerializer
 
 class AssetViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows assets to be viewed or edited.
+    Supports filtering by name, tag, model, location, and criticality.
     """
-    queryset = Asset.objects.all().order_by('-created_at')
+    queryset = Asset.objects.all().order_by('name')
     serializer_class = AssetSerializer
-    permission_classes = [permissions.IsAuthenticated] # Or more specific permissions
+    permission_classes = [permissions.IsAuthenticated] # Or more specific permissions as needed
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = {
+        'name': ['icontains'],
+        'tag': ['exact', 'icontains'],
+        'model': ['icontains'],
+        'location': ['icontains', 'exact'],
+        'criticality': ['exact', 'in'],
+        'installation_date': ['exact', 'year__gte', 'year__lte', 'range']
+    }
+    search_fields = ['name', 'tag', 'model', 'serial_number', 'location', 'description']
 
-    # Optional: You can add custom actions or override methods here
-    # For example, to implement more complex filtering or specific business logic
-
+    # Example:
     # def get_queryset(self):
     #     """
     #     Optionally restricts the returned assets,
-    #     for example by filtering for a user-specific company.
+    #     for example by filtering for a user-specific company or department.
     #     """
     #     user = self.request.user
-    #     # Example: return Asset.objects.filter(company=user.company)
-    #     return Asset.objects.all().order_by('-created_at')
-
-    # Example of a custom action:
-    # from rest_framework.decorators import action
-    # from rest_framework.response import Response
-    # @action(detail=True, methods=['post'])
-    # def perform_maintenance(self, request, pk=None):
-    #     asset = self.get_object()
-    #     # ... logic for performing maintenance ...
-    #     return Response({'status': 'maintenance scheduled'})
+    #     # return Asset.objects.filter(company=user.company_profile.company)
+    #     return Asset.objects.all().order_by('name')

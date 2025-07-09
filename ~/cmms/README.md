@@ -22,6 +22,24 @@ cmms/
 │   │   ├── serializers.py
 │   │   ├── urls.py
 │   │   └── views.py
+│   ├── inventory/        # Django app for Inventory Management
+│   │   ├── __init__.py
+│   │   ├── admin.py
+│   │   ├── apps.py
+│   │   ├── migrations/
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── urls.py
+│   │   └── views.py
+│   ├── work_orders/      # Django app for Work Order Management
+│   │   ├── __init__.py
+│   │   ├── admin.py
+│   │   ├── apps.py
+│   │   ├── migrations/
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── urls.py
+│   │   └── views.py
 │   ├── corrective_maintenance/ # Django app for Corrective Maintenance
 │   │   ├── __init__.py
 │   │   ├── admin.py
@@ -112,6 +130,18 @@ cmms/
             *   Breakdown Reports: `http://localhost:8000/api/cm/breakdown-reports/`
             *   Fault Categories: `http://localhost:8000/api/cm/fault-categories/`
             *   Root Causes: `http://localhost:8000/api/cm/root-causes/`
+        *   Work Order Management:
+            *   Work Orders: `http://localhost:8000/api/wo/work-orders/`
+            *   Work Order Types: `http://localhost:8000/api/wo/types/`
+            *   Priorities: `http://localhost:8000/api/wo/priorities/`
+            *   Work Order Tasks: `http://localhost:8000/api/wo/tasks/`
+        *   Inventory Management:
+            *   Spare Part Categories: `http://localhost:8000/api/inventory/categories/`
+            *   Vendors: `http://localhost:8000/api/inventory/vendors/`
+            *   Warehouses: `http://localhost:8000/api/inventory/warehouses/`
+            *   Spare Parts: `http://localhost:8000/api/inventory/parts/`
+            *   Stock Items: `http://localhost:8000/api/inventory/stock-items/`
+            *   Part Reservations: `http://localhost:8000/api/inventory/reservations/`
         *   Admin panel: `http://localhost:8000/admin/` (You'll need to create a superuser first)
     *   **Frontend UI:** `http://localhost:3000/`
 
@@ -295,21 +325,185 @@ cmms/
 | resolution_details (optional)     | TextField, blank, null
 | root_cause_analysis (optional)    | TextField, blank, null
 | identified_root_causes (M2M, opt) | -> RootCause.uuid
+| work_order (FK, optional)         | -> WorkOrder.uuid
 | created_at                        | DateTimeField, auto_now_add=True
 | updated_at                        | DateTimeField, auto_now=True
 +-----------------------------------+
-      |
-      |1..* (Asset can have multiple breakdown reports)
-      V
-+---------------------+
-| Asset               | (defined previously)
-+---------------------+
+      |                                   |
+      |1..* (Asset can have multiple)     |0..1 (Breakdown can have one WorkOrder)
+      V                                   V
++---------------------+           +-----------------------------------+
+| Asset               |           | WorkOrder                         | (defined below)
++---------------------+           +-----------------------------------+
       |
       |0..* (BreakdownReport can have multiple RootCauses)
       V
 +-----------------------------------+
 | RootCause                         | (defined above)
 +-----------------------------------+
+
+
++-----------------------------------+
+| WorkOrderType                     |
++-----------------------------------+
+| uuid (PK)                         | UUIDField
+| name                              | CharField(100), unique
+| description                       | TextField, blank, null
+| created_at                        | DateTimeField, auto_now_add=True
+| updated_at                        | DateTimeField, auto_now=True
++-----------------------------------+
+
+
++-----------------------------------+
+| Priority                          |
++-----------------------------------+
+| uuid (PK)                         | UUIDField
+| name                              | CharField(50), unique
+| description                       | TextField, blank, null
+| level                             | PositiveIntegerField, unique
+| created_at                        | DateTimeField, auto_now_add=True
+| updated_at                        | DateTimeField, auto_now=True
++-----------------------------------+
+
+
++-----------------------------------+
+| WorkOrder                         |
++-----------------------------------+
+| uuid (PK)                         | UUIDField
+| work_order_id                     | CharField(50), unique, default=generate_work_order_id
+| title                             | CharField(255)
+| description                       | TextField, blank, null
+| work_order_type (FK)              | -> WorkOrderType.uuid
+| asset (FK, optional)              | -> Asset.uuid
+| priority (FK, optional)           | -> Priority.uuid
+| status                            | CharField(20) (NEW, ASSIGNED, COMPLETED, etc.)
+| reported_by (FK, optional)        | -> User.id
+| assigned_to_technician (FK, opt)  | -> User.id
+| required_skills                   | TextField, blank, null
+| estimated_hours                   | DecimalField(6,2), blank, null
+| actual_hours                      | DecimalField(6,2), blank, null
+| scheduled_start_date (optional)   | DateTimeField, blank, null
+| scheduled_end_date (optional)     | DateTimeField, blank, null
+| actual_start_date (optional)      | DateTimeField, blank, null
+| actual_end_date (optional)        | DateTimeField, blank, null
+| completion_notes                  | TextField, blank, null
+| source_maintenance_plan (FK, opt) | -> MaintenancePlan.uuid
+| source_breakdown_report (FK, opt) | -> BreakdownReport.uuid (Careful: circular if BreakdownReport also FKs to WorkOrder directly. One should be primary or use a different relation name)
+| created_at                        | DateTimeField, auto_now_add=True
+| updated_at                        | DateTimeField, auto_now=True
++-----------------------------------+
+  |-> Asset, WorkOrderType, Priority, User, MaintenancePlan, BreakdownReport (see individual FKs)
+
+
++-----------------------------------+
+| WorkOrderTask                     |
++-----------------------------------+
+| uuid (PK)                         | UUIDField
+| work_order (FK)                   | -> WorkOrder.uuid
+| description                       | TextField
+| status                            | CharField(20) (PENDING, IN_PROGRESS, COMPLETED, etc.)
+| sequence_order                    | PositiveIntegerField, default=0
+| estimated_hours                   | DecimalField(5,2), blank, null
+| actual_hours                      | DecimalField(5,2), blank, null
+| notes                             | TextField, blank, null
+| created_at                        | DateTimeField, auto_now_add=True
+| updated_at                        | DateTimeField, auto_now=True
++-----------------------------------+
+      |
+      |1..* (WorkOrder can have multiple tasks)
+      V
++-----------------------------------+
+| WorkOrder                         | (defined above)
++-----------------------------------+
+
+
++-----------------------------------+
+| SparePartCategory                 |
++-----------------------------------+
+| uuid (PK)                         | UUIDField
+| name                              | CharField(150), unique
+| description                       | TextField, blank, null
+| parent_category (FK, optional)    | -> SparePartCategory.uuid (self-referential)
+| created_at                        | DateTimeField, auto_now_add=True
+| updated_at                        | DateTimeField, auto_now=True
++-----------------------------------+
+
+
++-----------------------------------+
+| Vendor                            |
++-----------------------------------+
+| uuid (PK)                         | UUIDField
+| name                              | CharField(255), unique
+| contact_person                    | CharField(255), blank, null
+| phone                             | CharField(50), blank, null
+| email                             | EmailField, blank, null
+| address                           | TextField, blank, null
+| created_at                        | DateTimeField, auto_now_add=True
+| updated_at                        | DateTimeField, auto_now=True
++-----------------------------------+
+
+
++-----------------------------------+
+| Warehouse                         |
++-----------------------------------+
+| uuid (PK)                         | UUIDField
+| name                              | CharField(150), unique
+| location_description              | TextField, blank, null
+| is_active                         | BooleanField, default=True
+| created_at                        | DateTimeField, auto_now_add=True
+| updated_at                        | DateTimeField, auto_now=True
++-----------------------------------+
+
+
++-----------------------------------+
+| SparePart                         |
++-----------------------------------+
+| uuid (PK)                         | UUIDField
+| name                              | CharField(255)
+| part_number                       | CharField(100), unique
+| description                       | TextField, blank, null
+| category (FK, optional)           | -> SparePartCategory.uuid
+| default_vendor (FK, optional)     | -> Vendor.uuid
+| cost_per_unit                     | DecimalField(10,2), blank, null
+| unit_of_measure                   | CharField(10) (PCS, BOX, M, etc.)
+| created_at                        | DateTimeField, auto_now_add=True
+| updated_at                        | DateTimeField, auto_now=True
++-----------------------------------+
+  |-> SparePartCategory, Vendor
+
+
++-----------------------------------+
+| StockItem                         |
++-----------------------------------+
+| uuid (PK)                         | UUIDField
+| spare_part (FK)                   | -> SparePart.uuid
+| warehouse (FK)                    | -> Warehouse.uuid
+| quantity_on_hand                  | DecimalField(10,2), default=0
+| reorder_point (optional)          | DecimalField(10,2), blank, null
+| last_stocked_date (optional)      | DateTimeField, blank, null
+| notes                             | TextField, blank, null
+| created_at                        | DateTimeField, auto_now_add=True
+| updated_at                        | DateTimeField, auto_now=True
++-----------------------------------+
+  |-> SparePart, Warehouse
+  (Unique constraint on spare_part, warehouse)
+
+
++-----------------------------------+
+| PartReservation                   |
++-----------------------------------+
+| uuid (PK)                         | UUIDField
+| work_order (FK)                   | -> WorkOrder.uuid
+| spare_part (FK)                   | -> SparePart.uuid
+| quantity_reserved                 | DecimalField(10,2)
+| reservation_date                  | DateTimeField, auto_now_add=True
+| is_fulfilled                      | BooleanField, default=False
+| fulfilled_date (optional)         | DateTimeField, blank, null
+| notes                             | TextField, blank, null
+| created_at                        | DateTimeField, auto_now_add=True
+| updated_at                        | DateTimeField, auto_now=True
++-----------------------------------+
+  |-> WorkOrder, SparePart
 
 ```
 *(More models and relationships will be added as other modules are developed.)*
